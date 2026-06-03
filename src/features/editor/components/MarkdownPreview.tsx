@@ -1,13 +1,18 @@
 import { useEffect, useId, useState } from "react";
 import mermaid from "mermaid";
 import Markdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type MarkdownPreviewProps = {
   markdown: string;
 };
 
 export function MarkdownPreview({ markdown }: MarkdownPreviewProps) {
-  return <Markdown components={components}>{markdown}</Markdown>;
+  return (
+    <Markdown components={components} remarkPlugins={[remarkGfm]}>
+      {markdown}
+    </Markdown>
+  );
 }
 
 const components: Components = {

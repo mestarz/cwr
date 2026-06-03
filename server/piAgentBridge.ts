@@ -1,10 +1,26 @@
 import { createAgentSession, defineTool, SessionManager, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { Type, type Model } from "@earendil-works/pi-ai";
 import { resolve } from "node:path";
-import type { AgentBridgeInput, AgentEditorResult, AgentFloatingWidget, AgentStatusListener, AgentStatusUpdate, AgentTaskIntent, RelatedFile } from "./types.js";
+import type {
+  AgentBridgeInput,
+  AgentEditorResult,
+  AgentFloatingWidget,
+  AgentQuickAction,
+  AgentStatusListener,
+  AgentStatusUpdate,
+  AgentTaskIntent,
+  CodeFocus,
+  RelatedFile
+} from "./types.js";
 import { understandTaskIntent } from "./intent/understandTaskIntent.js";
 import { resolvePiAgentModel } from "./piAgentModels.js";
+import { runQuickTool } from "./quickTools/index.js";
+import { closeFloatingWidgetsTool } from "./quickTools/closeFloatingWidgetsTool.js";
+import { focusFileTool } from "./quickTools/focusFileTool.js";
 import { showExplanationSkill, showMarkdownDiagramSkill, showRelatedFilesSkill } from "./skills/index.js";
+
+const builtinWorkspaceTools = ["read", "grep", "find", "ls"] as const;
+const diagramRequestPattern = /图|流程|结构|链路|架构|mermaid|markdown|diagram|flow|chart/i;
 
 const explanationParameters = Type.Object({
   title: Type.String({ description: "悬浮框标题" }),
@@ -39,25 +55,40 @@ const relatedFilesParameters = Type.Object({
   )
 });
 
+const focusFileParameters = Type.Object({
+  file: Type.String({ description: "需要聚焦的工作区文件路径，必须使用相对工程目录的路径" }),
+  startLine: Type.Optional(Type.Number({ description: "可选，聚焦起始行号" })),
+  endLine: Type.Optional(Type.Number({ description: "可选，聚焦结束行号" }))
+});
+
+const closeFloatingWidgetsParameters = Type.Object({});
+
 export interface PiAgentBridge {
   run(input: AgentBridgeInput, onStatus?: AgentStatusListener): Promise<AgentEditorResult>;
 }
 
 export class PiAgentBridgeRuntime implements PiAgentBridge {
   async run(input: AgentBridgeInput, onStatus?: AgentStatusListener): Promise<AgentEditorResult> {
+    const quickResult = await runQuickTool(input, onStatus);
+    if (quickResult) {
+      return quickResult;
+    }
+
     onStatus?.({ message: "理解用户意图" });
     const intent = await understandTaskIntent(input, onStatus);
     onStatus?.({ message: "调用任务模型", detail: formatModelName(intent.modelProfile) });
     const floatingWidgets: AgentFloatingWidget[] = [];
     const relatedFiles: RelatedFile[] = [];
+    const quickActions: AgentQuickAction[] = [];
     const workspaceRoot = resolve(input.workspaceRoot);
     const piModel = resolvePiAgentModel(intent.modelProfile);
+    const enabledTools = getEnabledTools(input, intent);
     const { session } = await createAgentSession({
       cwd: workspaceRoot,
       ...piModel,
-      customTools: createTools(floatingWidgets, relatedFiles),
+      customTools: createTools(floatingWidgets, relatedFiles, quickActions, enabledTools.customToolNames),
       sessionManager: SessionManager.inMemory(workspaceRoot),
-      tools: ["read", "grep", "find", "ls", showExplanationSkill.name, showMarkdownDiagramSkill.name, showRelatedFilesSkill.name]
+      tools: enabledTools.toolNames
     });
     const selectedModelName = formatSelectedModelName(session.model) ?? formatModelName(intent.modelProfile);
     onStatus?.({ message: "已选择任务模型", detail: selectedModelName });
@@ -70,7 +101,7 @@ export class PiAgentBridgeRuntime implements PiAgentBridge {
     });
 
     try {
-      await session.prompt(createUserPrompt(input, intent));
+      await session.prompt(createUserPrompt(input, intent, enabledTools.customToolNames));
     } finally {
       unsubscribe();
       session.dispose();
@@ -82,19 +113,17 @@ export class PiAgentBridgeRuntime implements PiAgentBridge {
       intent,
       floatingWidgets,
       relatedFiles,
-      codeFocus: relatedFiles[0]
-        ? {
-            file: relatedFiles[0].path,
-            startLine: 1
-          }
-        : undefined
+      codeFocus: getCodeFocus(quickActions, relatedFiles),
+      quickActions
     };
   }
 }
 
 function createTools(
   floatingWidgets: AgentFloatingWidget[],
-  relatedFiles: RelatedFile[]
+  relatedFiles: RelatedFile[],
+  quickActions: AgentQuickAction[],
+  enabledToolNames: string[]
 ) {
   const explanationTool = defineTool<typeof explanationParameters, AgentFloatingWidget>({
     name: showExplanationSkill.name,
@@ -144,7 +173,54 @@ function createTools(
     }
   });
 
-  return [explanationTool, markdownDiagramTool, relatedFilesTool];
+  const focusFileQuickTool = defineTool<typeof focusFileParameters, AgentQuickAction>({
+    name: focusFileTool.name,
+    label: "聚焦文件",
+    description: `${focusFileTool.description} 当用户要求聚焦、定位、打开、切换到某个文件，但入口快速规则没有命中时调用。`,
+    parameters: focusFileParameters,
+    async execute(_toolCallId, params) {
+      const action: AgentQuickAction = {
+        type: "focus_file",
+        file: params.file,
+        startLine: params.startLine,
+        endLine: params.endLine
+      };
+      quickActions.push(action);
+
+      return {
+        content: [{ type: "text", text: `已请求前端聚焦文件：${params.file}` }],
+        details: action
+      };
+    }
+  });
+
+  const closeFloatingWidgetsQuickTool = defineTool<typeof closeFloatingWidgetsParameters, AgentQuickAction>({
+    name: closeFloatingWidgetsTool.name,
+    label: "关闭右侧浮层",
+    description: `${closeFloatingWidgetsTool.description} 当用户要求关闭、隐藏、收起右侧解释框、文本框、Markdown 图或图形框，但入口快速规则没有命中时调用。`,
+    parameters: closeFloatingWidgetsParameters,
+    async execute() {
+      const action: AgentQuickAction = {
+        type: "close_floating_widgets"
+      };
+      quickActions.push(action);
+
+      return {
+        content: [{ type: "text", text: "已请求前端关闭右侧浮层。" }],
+        details: action
+      };
+    }
+  });
+
+  const allTools = [
+    explanationTool,
+    markdownDiagramTool,
+    relatedFilesTool,
+    focusFileQuickTool,
+    closeFloatingWidgetsQuickTool
+  ];
+
+  return allTools.filter((tool) => enabledToolNames.includes(tool.name));
 }
 
 function toStatusUpdate(event: AgentSessionEvent, selectedModelName?: string): AgentStatusUpdate | undefined {
@@ -183,7 +259,9 @@ function getToolLabel(toolName: string) {
     ls: "列目录",
     [showExplanationSkill.name]: "展示解释",
     [showMarkdownDiagramSkill.name]: "展示图",
-    [showRelatedFilesSkill.name]: "展示相关文件"
+    [showRelatedFilesSkill.name]: "展示相关文件",
+    [focusFileTool.name]: "聚焦文件",
+    [closeFloatingWidgetsTool.name]: "关闭右侧浮层"
   };
 
   return labels[toolName] ?? toolName;
@@ -220,6 +298,14 @@ function formatToolArgs(toolName: string, args: unknown) {
     return typeof input.title === "string" ? trimStatusText(input.title) : undefined;
   }
 
+  if (toolName === focusFileTool.name) {
+    return stringifyArgs(input, ["file", "startLine", "endLine"]);
+  }
+
+  if (toolName === closeFloatingWidgetsTool.name) {
+    return "右侧解释和图形浮层";
+  }
+
   return trimStatusText(JSON.stringify(input));
 }
 
@@ -253,42 +339,95 @@ function formatSelectedModelName(model: Model<any> | undefined) {
   return model ? `${model.provider}/${model.id}` : undefined;
 }
 
-function createUserPrompt(input: AgentBridgeInput, intent: AgentTaskIntent) {
-  return [
+function getCodeFocus(quickActions: AgentQuickAction[], relatedFiles: RelatedFile[]): CodeFocus | undefined {
+  const focusAction = getLastFocusAction(quickActions);
+
+  if (focusAction) {
+    return {
+      file: focusAction.file,
+      startLine: focusAction.startLine ?? 1,
+      endLine: focusAction.endLine
+    };
+  }
+
+  return relatedFiles[0]
+    ? {
+        file: relatedFiles[0].path,
+        startLine: 1
+      }
+    : undefined;
+}
+
+function getLastFocusAction(quickActions: AgentQuickAction[]) {
+  for (let index = quickActions.length - 1; index >= 0; index -= 1) {
+    const action = quickActions[index];
+
+    if (action.type === "focus_file") {
+      return action;
+    }
+  }
+
+  return undefined;
+}
+
+function getEnabledTools(input: AgentBridgeInput, intent: AgentTaskIntent) {
+  const customToolNames = new Set<string>();
+
+  if (intent.requiresExplanation) {
+    customToolNames.add(showExplanationSkill.name);
+  }
+
+  if (intent.requiresWorkspaceSearch || intent.taskKind === "module_task") {
+    customToolNames.add(showRelatedFilesSkill.name);
+  }
+
+  if (intent.requiresDiagram || diagramRequestPattern.test(input.message)) {
+    customToolNames.add(showMarkdownDiagramSkill.name);
+  }
+
+  customToolNames.add(focusFileTool.name);
+  customToolNames.add(closeFloatingWidgetsTool.name);
+
+  return {
+    customToolNames: [...customToolNames],
+    toolNames: [...builtinWorkspaceTools, ...customToolNames]
+  };
+}
+
+function createUserPrompt(input: AgentBridgeInput, intent: AgentTaskIntent, enabledToolNames: string[]) {
+  const lines = [
     "你是 Emma Web 编辑器的代码阅读 Agent。",
     "必须通过可用工具向前端展示信息，不要依赖普通助手文本作为 UI 输出。",
-    "所有面向用户展示的解释文字必须控制在 300 字以内。",
-    "解释文本要面向正在理解功能的人，而不是复述源码。非必要不要输出变量名、函数名、类型名或内部字段名。",
-    "当代码符号可以被翻译成含义时，必须优先说含义：例如不要说“改写某个 prompt 变量”，而要说“优化用于生成提示词的内容”。",
-    "只有在用户明确要求定位具体实现、接口名、变量名、调用点，或不写名称会影响准确性时，才保留代码专有名词。",
-    "解释文本必须像人说话一样有断句和语气重点。优先使用 2 到 4 个短句或短段落，不要把原因、动作、结果堆成一整段长句。",
-    "每段只表达一个重点；先说结论，再补充原因或影响。",
-    "Markdown、Mermaid、结构图或流程图必须保持精简；如果包含图，图中的节点数量不能超过 10 个。",
-    "图分为两类：overview 高层抽象图，module_detail 具体模块细节图。",
-    "overview 图只表达模块、阶段、职责、边界、数据流或调用关系的高层结构；禁止展示变量名、函数名、具体文件路径、字段名等实现细节。",
-    "module_detail 图用于解释某个具体模块内部实现，可以展示文件名、函数名、变量名、关键字段、调用点或具体入口，但必须围绕模块职责组织，不要把代码逐行翻译成节点。",
-    "生成 Mermaid 图时必须优先考虑右侧悬浮框展示效果。默认使用 flowchart TD 或 flowchart TB，不要默认使用 LR。",
-    "只有 4 个以内节点的简单线性流程才允许使用 LR；5 个以上节点禁止画成一条横向长链。",
-    "图的深度不能超过 4 层，任一层横向节点不能超过 4 个；不要生成 5 层以上的纵向深链，也不要生成单层 5 个以上节点的横向宽链。",
-    "如果原始流程超过这些限制，必须先做抽象归并：把细碎实现步骤合并成模块、阶段、职责或边界，再画模块之间的关系。",
-    "图应该表达抽象结构和模块解耦关系，而不是把每个变量、函数、请求步骤都画成节点。",
-    "如果流程超过 5 个节点，优先拆成 2 到 4 层：上层放入口/输入/触发，中层放分析/路由/处理，下层放输出/展示/结果；能分组时使用 subgraph。",
-    "节点标签必须短，优先用 2 到 6 个中文词表达职责；不要把变量名、长句或完整解释放进节点。",
-    "如果同时展示解释文本和图，解释文本里强调的关键节点必须在图中同步高亮。",
-    "Mermaid 高亮节点必须直接写在 markdown 中：优先使用 classDef focus fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#111827; 并用 class 节点ID focus 标记重点节点。必要时可以使用 style 单独标记。",
+    "面向用户的解释、图和相关文件必须使用对应工具；每个工具的参数说明就是输出格式约束。",
     "用户请求已经先经过意图理解，下面的意图结果是后续工具选择和模型路由的依据。",
     `意图理解结果：${JSON.stringify(intent)}`,
-    `如果需要解释代码或上下文，调用 ${showExplanationSkill.name}。`,
-    `如果需要展示 Markdown、Mermaid 图、结构图或流程图，调用 ${showMarkdownDiagramSkill.name}。必须先选择 diagramType：overview 用于高层抽象图，module_detail 用于具体模块细节图。markdown 字段必须是纯 Markdown 或纯 mermaid 代码块，可直接渲染；不要夹带图外说明文字，并确保图节点数量不超过 10 个。Mermaid 图默认使用 TD/TB 纵向或分层布局，禁止把 5 个以上节点画成 LR 横向长链；深度不超过 4 层，任一层宽度不超过 4 个节点，超过时先做模块抽象和职责归并。需要强调的节点必须用 classDef/class 或 style 着色。`,
-    `如果需要列出和用户问题相关的文件，调用 ${showRelatedFilesSkill.name}。`,
-    `当用户询问某个功能在哪些文件实现、涉及哪些文件、相关文件列表、调用链文件、某问题应该看哪些文件时，必须先用 read/grep/find/ls 分析工作区，再调用 ${showRelatedFilesSkill.name}。`,
-    `不要把相关文件清单输出到 ${showExplanationSkill.name} 或 ${showMarkdownDiagramSkill.name}；左侧文件区只读取 ${showRelatedFilesSkill.name} 的结果。`,
-    `调用 ${showRelatedFilesSkill.name} 时只提交已经确认存在且确实相关的文件，不要提交不确定、猜测、泛相关或低相关文件。`,
-    "每个相关文件的 reason 必须说明它在该功能中的职责、使用范围、关键关系或需要用户关注的原因。",
-    "相关文件路径必须来自工作区或当前文件路径，不要编造路径。",
     `用户问题：${input.message}`,
     `工程目录：${input.workspaceRoot}`,
     `当前文件：${input.activeFile}`,
     input.selectedText ? `选中文本：\n${input.selectedText}` : "选中文本：无"
-  ].join("\n\n");
+  ];
+
+  if (enabledToolNames.includes(showExplanationSkill.name)) {
+    lines.push(`需要解释代码或上下文时，调用 ${showExplanationSkill.name}。`);
+  }
+
+  if (enabledToolNames.includes(showMarkdownDiagramSkill.name)) {
+    lines.push(`需要展示 Markdown、Mermaid 图、结构图或流程图时，调用 ${showMarkdownDiagramSkill.name}。`);
+  }
+
+  if (enabledToolNames.includes(showRelatedFilesSkill.name)) {
+    lines.push(
+      `需要列出相关文件时，先用 read/grep/find/ls 确认存在和关系，再调用 ${showRelatedFilesSkill.name}。不要把文件清单写进解释或图。`
+    );
+  }
+
+  if (enabledToolNames.includes(focusFileTool.name)) {
+    lines.push(`需要聚焦、定位、打开或切换文件时，调用 ${focusFileTool.name}。`);
+  }
+
+  if (enabledToolNames.includes(closeFloatingWidgetsTool.name)) {
+    lines.push(`需要关闭、隐藏或收起右侧浮层时，调用 ${closeFloatingWidgetsTool.name}。`);
+  }
+
+  return lines.join("\n\n");
 }

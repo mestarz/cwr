@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { AgentEditorResult, WorkspaceFile } from "../../domain/agent";
+import type { AgentEditorResult, AgentQuickAction, WorkspaceFile } from "../../domain/agent";
 import { sendAgentMessageStream } from "../../services/agentClient";
 
 const initialResult: AgentEditorResult = {
@@ -25,7 +25,10 @@ export function useEditorWorkspace(workspaceRoot: string, initialFiles: Workspac
       return;
     }
 
-    setAgentResult(initialResult);
+    setAgentResult((current) => ({
+      ...current,
+      floatingWidgets: []
+    }));
     setIsSending(true);
     setAgentStatus("AI 正在执行：理解意图、选择模型并分析工作区");
     try {
@@ -40,10 +43,16 @@ export function useEditorWorkspace(workspaceRoot: string, initialFiles: Workspac
           setAgentStatus(status.detail ? `AI 正在执行：${status.message} - ${status.detail}` : `AI 正在执行：${status.message}`);
         }
       );
-      setAgentResult(result);
+      setAgentResult((current) => applyQuickActions(current, result));
 
       if (result.codeFocus && files.some((file) => file.path === result.codeFocus?.file)) {
         setActivePath(result.codeFocus.file);
+      }
+
+      for (const action of result.quickActions ?? []) {
+        if (action.type === "focus_file" && files.some((file) => file.path === action.file)) {
+          setActivePath(action.file);
+        }
       }
     } catch (error) {
       setAgentResult({
@@ -77,4 +86,29 @@ export function useEditorWorkspace(workspaceRoot: string, initialFiles: Workspac
     setSelectedText,
     submitMessage
   };
+}
+
+function applyQuickActions(current: AgentEditorResult, result: AgentEditorResult) {
+  if (!result.quickActions?.length) {
+    return result;
+  }
+
+  const base = hasDisplayResult(result) ? result : current;
+
+  return result.quickActions.reduce(applyQuickAction, base);
+}
+
+function applyQuickAction(current: AgentEditorResult, action: AgentQuickAction): AgentEditorResult {
+  if (action.type === "close_floating_widgets") {
+    return {
+      ...current,
+      floatingWidgets: []
+    };
+  }
+
+  return current;
+}
+
+function hasDisplayResult(result: AgentEditorResult) {
+  return Boolean(result.intent) || result.floatingWidgets.length > 0 || result.relatedFiles.length > 0;
 }

@@ -44,11 +44,23 @@ export type AgentTaskIntent = {
   requiresExplanation: boolean;
 };
 
+export type AgentQuickAction =
+  | {
+      type: "focus_file";
+      file: string;
+      startLine?: number;
+      endLine?: number;
+    }
+  | {
+      type: "close_floating_widgets";
+    };
+
 export type AgentEditorResult = {
   intent?: AgentTaskIntent;
   floatingWidgets: AgentFloatingWidget[];
   relatedFiles: RelatedFile[];
   codeFocus?: CodeFocus;
+  quickActions?: AgentQuickAction[];
 };
 
 export type AgentStatusUpdate = {

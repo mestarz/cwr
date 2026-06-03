@@ -2,6 +2,7 @@ import { FileCode2, LoaderCircle, PanelLeft, Send } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { AgentFloatingStack } from "./components/AgentFloatingStack";
+import { MarkdownPreview } from "./components/MarkdownPreview";
 import { useEditorWorkspace } from "./useEditorWorkspace";
 import type { LoadedWorkspace } from "../../app/App";
 
@@ -31,6 +32,7 @@ export function WorkspaceShell({ workspace: loadedWorkspace }: WorkspaceShellPro
     return [...relatedByPath.values()].sort((left, right) => right.relevance - left.relevance);
   }, [workspace.agentResult.relatedFiles, workspace.files]);
   const hasRelatedFiles = relatedFiles.length > 0;
+  const isActiveMarkdown = workspace.activeFile ? isMarkdownFile(workspace.activeFile.path, workspace.activeFile.language) : false;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -111,8 +113,12 @@ export function WorkspaceShell({ workspace: loadedWorkspace }: WorkspaceShellPro
             <span>{workspace.agentStatus}</span>
           </div>
         ) : null}
-        <div className="editor-frame">
-          {workspace.activeFile ? (
+        <div className={isActiveMarkdown ? "editor-frame markdown-frame" : "editor-frame"}>
+          {workspace.activeFile && isActiveMarkdown ? (
+            <div className="markdown-file-preview markdown-body">
+              <MarkdownPreview markdown={workspace.activeFile.content} />
+            </div>
+          ) : workspace.activeFile ? (
             <Editor
               height="100%"
               language={workspace.activeFile.language}
@@ -160,4 +166,8 @@ export function WorkspaceShell({ workspace: loadedWorkspace }: WorkspaceShellPro
       <AgentFloatingStack widgets={workspace.agentResult.floatingWidgets} />
     </main>
   );
+}
+
+function isMarkdownFile(path: string, language: string) {
+  return language === "markdown" || /\.mdx?$/i.test(path);
 }
