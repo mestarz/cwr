@@ -1,0 +1,133 @@
+{
+  "modelProfiles": {
+    "intent": {
+      "provider": "openai-codex",
+      "name": "gpt-5.3-codex-spark",
+      "temperature": 0,
+      "maxTokens": 600,
+      "purpose": "意图理解模型。mode 为 model 时使用；mode 为 rules 时不调用模型。"
+    },
+    "local-file": {
+      "provider": "openai-codex",
+      "name": "gpt-5.3-codex-spark",
+      "temperature": 0.1,
+      "maxTokens": 3000,
+      "purpose": "函数级、文件级理解，以及明确范围的单文件简单修改。"
+    },
+    "module-work": {
+      "provider": "openai-codex",
+      "name": "gpt-5.5",
+      "temperature": 0.1,
+      "maxTokens": 7000,
+      "purpose": "跨文件、功能模块级理解、相关文件定位、模块级重构和大范围改造。"
+    }
+  },
+  "intentUnderstanding": {
+    "mode": "model",
+    "modelProfile": "intent"
+  },
+  "tasks": [
+    {
+      "taskKind": "module_task",
+      "routingProfile": "module_work",
+      "description": "跨文件、功能模块级理解、相关文件定位、模块级重构或大范围功能改造。",
+      "keywords": [
+        "相关文件",
+        "哪些文件",
+        "那些文件",
+        "在哪些文件",
+        "在哪个文件",
+        "文件实现",
+        "实现在哪",
+        "功能在哪",
+        "调用链",
+        "应该看哪些",
+        "模块",
+        "功能",
+        "功能模块",
+        "架构",
+        "流程",
+        "链路",
+        "跨文件",
+        "全局",
+        "整体",
+        "大范围",
+        "重构",
+        "解耦",
+        "抽离",
+        "整理架构",
+        "优化架构",
+        "where is",
+        "which files",
+        "related files",
+        "module",
+        "architecture",
+        "flow",
+        "refactor"
+      ],
+      "modelProfile": "module-work",
+      "confidence": 0.84,
+      "flags": {
+        "requiresWorkspaceSearch": true,
+        "requiresCodeEdit": true,
+        "requiresDiagram": true,
+        "requiresExplanation": true
+      }
+    },
+    {
+      "taskKind": "local_file_task",
+      "routingProfile": "local_file",
+      "description": "函数级、文件级理解、局部解释，或用户已经给出明确范围的单文件简单修改。",
+      "keywords": [
+        "当前文件",
+        "这个文件",
+        "这个函数",
+        "这个方法",
+        "这个组件",
+        "这段代码",
+        "选中",
+        "函数",
+        "方法",
+        "组件",
+        "解释",
+        "说明",
+        "分析",
+        "看一下",
+        "是什么",
+        "为什么",
+        "职责",
+        "作用",
+        "修改",
+        "改一下",
+        "新增",
+        "删除",
+        "调整",
+        "优化",
+        "开始修改",
+        "current file",
+        "this file",
+        "this function",
+        "this component",
+        "selected",
+        "explain",
+        "analyze",
+        "what is",
+        "why",
+        "change",
+        "implement",
+        "add ",
+        "remove",
+        "update"
+      ],
+      "modelProfile": "local-file",
+      "confidence": 0.78,
+      "flags": {
+        "requiresWorkspaceSearch": false,
+        "requiresCodeEdit": true,
+        "requiresDiagram": false,
+        "requiresExplanation": true
+      }
+    }
+  ],
+  "defaultTaskKind": "local_file_task"
+}
