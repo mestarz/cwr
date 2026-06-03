@@ -66,7 +66,6 @@
         "refactor"
       ],
       "modelProfile": "module-work",
-      "confidence": 0.84,
       "flags": {
         "requiresWorkspaceSearch": true,
         "requiresCodeEdit": true,
@@ -120,7 +119,6 @@
         "update"
       ],
       "modelProfile": "local-file",
-      "confidence": 0.78,
       "flags": {
         "requiresWorkspaceSearch": false,
         "requiresCodeEdit": true,

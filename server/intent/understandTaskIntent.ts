@@ -1,15 +1,27 @@
-import { completeSimple, getModel, type Context } from "@earendil-works/pi-ai";
-import type { AgentBridgeInput, AgentModelProfile, AgentRoutingProfile, AgentTaskIntent } from "../types.js";
+import { createAgentSession, defineTool, SessionManager } from "@earendil-works/pi-coding-agent";
+import { Type, type Model } from "@earendil-works/pi-ai";
+import { resolve } from "node:path";
+import type { AgentBridgeInput, AgentModelProfile, AgentStatusListener, AgentTaskIntent, AgentTaskKind } from "../types.js";
+import { resolvePiAgentModel } from "../piAgentModels.js";
 import type { IntentConfig, IntentModelProfileConfig, IntentTaskConfig } from "./intentConfig.js";
 import { loadIntentConfig } from "./intentConfig.js";
 
-type ModelIntentResponse = Partial<AgentTaskIntent>;
+type ModelIntentResponse = {
+  taskKind: AgentTaskKind;
+};
 
-export async function understandTaskIntent(input: AgentBridgeInput): Promise<AgentTaskIntent> {
+const emitTaskIntentToolName = "emit_task_intent";
+const emitTaskIntentParameters = Type.Object({
+  taskKind: Type.Union([Type.Literal("local_file_task"), Type.Literal("module_task")], {
+    description: "只能选择 local_file_task 或 module_task"
+  })
+});
+
+export async function understandTaskIntent(input: AgentBridgeInput, onStatus?: AgentStatusListener): Promise<AgentTaskIntent> {
   const config = await loadIntentConfig();
 
   if (config.intentUnderstanding.mode === "model") {
-    return understandTaskIntentWithModel(input, config);
+    return understandTaskIntentWithModel(input, config, onStatus);
   }
 
   return understandTaskIntentWithRules(input, config);
@@ -22,55 +34,76 @@ function understandTaskIntentWithRules(input: AgentBridgeInput, config: IntentCo
   return toIntent(task, config, input.selectedText.length > 0);
 }
 
-async function understandTaskIntentWithModel(input: AgentBridgeInput, config: IntentConfig): Promise<AgentTaskIntent> {
+async function understandTaskIntentWithModel(
+  input: AgentBridgeInput,
+  config: IntentConfig,
+  onStatus?: AgentStatusListener
+): Promise<AgentTaskIntent> {
   const modelProfile = getModelProfile(config.intentUnderstanding.modelProfile, config);
+  onStatus?.({ message: "调用意图理解模型", detail: formatModelName(modelProfile) });
 
-  if (!modelProfile.provider || !modelProfile.name) {
-    throw new Error("意图理解配置为 model 模式时，必须填写 intentUnderstanding.modelProfile 对应模型的 provider 和 name。");
+  let intent: AgentTaskIntent | undefined;
+  const intentTool = defineTool<typeof emitTaskIntentParameters, AgentTaskIntent>({
+    name: emitTaskIntentToolName,
+    label: "记录任务意图",
+    description: "返回 Emma 编辑器下一步执行所需的任务意图分类。只能在完成意图判断时调用。",
+    promptSnippet: "Emit the classified Emma task intent as a terminating structured tool result.",
+    promptGuidelines: [
+      `必须调用 ${emitTaskIntentToolName} 返回意图分类，不要用普通文本回答。`,
+      "只能在 local_file_task 和 module_task 之间二选一。",
+      "函数级、文件级、当前选区理解，或明确范围的单文件简单修改，归为 local_file_task。",
+      "跨文件功能模块理解、相关文件定位、架构链路分析、模块级重构或大范围改造，归为 module_task。",
+      "如果有选中文本且用户没有明显跨文件或模块诉求，优先 local_file_task。"
+    ],
+    parameters: emitTaskIntentParameters,
+    async execute(_toolCallId, params) {
+      intent = normalizeModelIntent(params, config, input.selectedText.length > 0);
+
+      return {
+        content: [{ type: "text", text: "意图理解结果已记录。" }],
+        details: intent,
+        terminate: true
+      };
+    }
+  });
+
+  const workspaceRoot = resolve(input.workspaceRoot);
+  const piModel = resolvePiAgentModel(modelProfile);
+  const { session } = await createAgentSession({
+    cwd: workspaceRoot,
+    ...piModel,
+    customTools: [intentTool],
+    sessionManager: SessionManager.inMemory(workspaceRoot),
+    tools: [emitTaskIntentToolName]
+  });
+  onStatus?.({
+    message: "已选择意图理解模型",
+    detail: formatSelectedModelName(session.model) ?? formatModelName(modelProfile)
+  });
+
+  try {
+    await session.prompt(createIntentPrompt(input, config));
+  } finally {
+    session.dispose();
   }
 
-  const context: Context = {
-    systemPrompt: createIntentSystemPrompt(config),
-    messages: [
-      {
-        role: "user",
-        content: createIntentUserPrompt(input),
-        timestamp: Date.now()
-      }
-    ]
-  };
-  const model = getModel(modelProfile.provider as never, modelProfile.name as never);
-  const message = await completeSimple(model, context, {
-    temperature: modelProfile.temperature,
-    maxTokens: modelProfile.maxTokens
-  });
-  const parsed = parseModelIntentResponse(extractText(message.content));
+  if (!intent) {
+    throw new Error(`Pi Agent 意图理解失败：模型未调用 ${emitTaskIntentToolName}。`);
+  }
 
-  return normalizeModelIntent(parsed, config, input.selectedText.length > 0);
+  return intent;
 }
 
-function createIntentSystemPrompt(config: IntentConfig) {
+function createIntentPrompt(input: AgentBridgeInput, config: IntentConfig) {
   return [
     "你是 Emma 编辑器的意图理解器，只负责判断用户请求类型，不执行代码任务。",
-    "必须只返回 JSON，不要返回 Markdown、解释文本或代码块。",
-    "JSON 字段必须包含：taskKind、routingProfile、requiresWorkspaceSearch、requiresCodeEdit、requiresDiagram、requiresExplanation、confidence、reason。",
-    "taskKind 和 routingProfile 只能从以下任务配置中选择；modelProfile 由服务端根据 taskKind 从配置推导，不需要你输出。",
-    JSON.stringify(
-      config.tasks.map((task) => ({
-        taskKind: task.taskKind,
-        routingProfile: task.routingProfile,
-        modelProfile: task.modelProfile,
-        description: task.description,
-        flags: task.flags
-      })),
-      null,
-      2
-    )
-  ].join("\n\n");
-}
-
-function createIntentUserPrompt(input: AgentBridgeInput) {
-  return [
+    `必须调用 ${emitTaskIntentToolName} 工具，只输出 taskKind。不要输出普通文本。`,
+    "候选任务：",
+    config.tasks.map((task) => `- ${task.taskKind}: ${task.description}`).join("\n"),
+    "分类规则：",
+    "local_file_task：函数级、文件级、当前选区理解，局部解释，或用户已经给出明确范围的单文件简单修改。",
+    "module_task：跨文件、功能模块级理解、相关文件定位、调用链/架构/流程分析、模块级重构或大范围改造。",
+    "如果有选中文本且用户没有明显跨文件或模块诉求，优先 local_file_task。",
     `用户问题：${input.message}`,
     `工程目录：${input.workspaceRoot}`,
     `当前文件：${input.activeFile}`,
@@ -84,22 +117,8 @@ function normalizeModelIntent(
   hasSelectedText: boolean
 ): AgentTaskIntent {
   const task = config.tasks.find((item) => item.taskKind === response.taskKind) ?? getDefaultTask(config);
-  const modelProfile = getModelProfile(task.modelProfile, config);
 
-  return {
-    taskKind: task.taskKind,
-    routingProfile: isRoutingProfile(response.routingProfile) ? response.routingProfile : task.routingProfile,
-    modelProfile,
-    requiresWorkspaceSearch: typeof response.requiresWorkspaceSearch === "boolean" ? response.requiresWorkspaceSearch : task.flags.requiresWorkspaceSearch,
-    requiresCodeEdit: typeof response.requiresCodeEdit === "boolean" ? response.requiresCodeEdit : task.flags.requiresCodeEdit,
-    requiresDiagram: typeof response.requiresDiagram === "boolean" ? response.requiresDiagram : task.flags.requiresDiagram,
-    requiresExplanation:
-      typeof response.requiresExplanation === "boolean"
-        ? response.requiresExplanation || hasSelectedText
-        : task.flags.requiresExplanation || hasSelectedText,
-    confidence: typeof response.confidence === "number" ? response.confidence : task.confidence,
-    reason: typeof response.reason === "string" && response.reason.length > 0 ? response.reason : task.description
-  };
+  return toIntent(task, config, hasSelectedText);
 }
 
 function toIntent(task: IntentTaskConfig, config: IntentConfig, hasSelectedText: boolean): AgentTaskIntent {
@@ -110,9 +129,7 @@ function toIntent(task: IntentTaskConfig, config: IntentConfig, hasSelectedText:
     requiresWorkspaceSearch: task.flags.requiresWorkspaceSearch,
     requiresCodeEdit: task.flags.requiresCodeEdit,
     requiresDiagram: task.flags.requiresDiagram,
-    requiresExplanation: task.flags.requiresExplanation || hasSelectedText,
-    confidence: hasSelectedText && task.taskKind === "local_file_task" ? Math.max(task.confidence, 0.82) : task.confidence,
-    reason: task.description
+    requiresExplanation: task.flags.requiresExplanation || hasSelectedText
   };
 }
 
@@ -138,6 +155,14 @@ function toModelProfile(id: string, profile: IntentModelProfileConfig): AgentMod
   };
 }
 
+function formatModelName(profile: AgentModelProfile) {
+  return `${profile.provider}/${profile.name}`;
+}
+
+function formatSelectedModelName(model: Model<any> | undefined) {
+  return model ? `${model.provider}/${model.id}` : undefined;
+}
+
 function getDefaultTask(config: IntentConfig) {
   const task = config.tasks.find((item) => item.taskKind === config.defaultTaskKind);
 
@@ -148,26 +173,6 @@ function getDefaultTask(config: IntentConfig) {
   return task;
 }
 
-function parseModelIntentResponse(text: string): ModelIntentResponse {
-  return JSON.parse(stripJsonFence(text)) as ModelIntentResponse;
-}
-
-function stripJsonFence(text: string) {
-  const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  return (match?.[1] ?? text).trim();
-}
-
-function extractText(content: Awaited<ReturnType<typeof completeSimple>>["content"]) {
-  return content
-    .filter((item) => item.type === "text")
-    .map((item) => item.text)
-    .join("\n");
-}
-
 function includesAny(text: string, keywords: string[]) {
   return keywords.some((keyword) => text.includes(keyword.toLowerCase()));
-}
-
-function isRoutingProfile(value: unknown): value is AgentRoutingProfile {
-  return value === "local_file" || value === "module_work";
 }

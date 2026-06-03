@@ -42,8 +42,6 @@ export type AgentTaskIntent = {
   requiresCodeEdit: boolean;
   requiresDiagram: boolean;
   requiresExplanation: boolean;
-  confidence: number;
-  reason: string;
 };
 
 export type AgentEditorResult = {
@@ -51,6 +49,11 @@ export type AgentEditorResult = {
   floatingWidgets: AgentFloatingWidget[];
   relatedFiles: RelatedFile[];
   codeFocus?: CodeFocus;
+};
+
+export type AgentStatusUpdate = {
+  message: string;
+  detail?: string;
 };
 
 export type AgentChatRequest = {

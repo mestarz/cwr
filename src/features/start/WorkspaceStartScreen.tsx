@@ -8,9 +8,13 @@ type WorkspaceStartScreenProps = {
   onLoaded: (workspace: LoadedWorkspace) => void;
 };
 
+const recentWorkspaceStorageKey = "emma.recentWorkspaces";
+const maxRecentWorkspaces = 8;
+
 export function WorkspaceStartScreen({ onLoaded }: WorkspaceStartScreenProps) {
   const [selectedRoot, setSelectedRoot] = useState("");
   const [browseRoot, setBrowseRoot] = useState("/root/workspace/game");
+  const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>(() => loadRecentWorkspaces());
   const [listing, setListing] = useState<WorkspaceDirectoryListing>();
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -30,9 +34,11 @@ export function WorkspaceStartScreen({ onLoaded }: WorkspaceStartScreenProps) {
     setIsLoading(true);
 
     try {
-      const files = await loadWorkspaceFiles(root.trim());
+      const workspaceRoot = root.trim();
+      const files = await loadWorkspaceFiles(workspaceRoot);
+      saveRecentWorkspace(workspaceRoot, recentWorkspaces, setRecentWorkspaces);
       onLoaded({
-        root: root.trim(),
+        root: workspaceRoot,
         files
       });
     } catch (caught) {
@@ -68,13 +74,32 @@ export function WorkspaceStartScreen({ onLoaded }: WorkspaceStartScreenProps) {
             <FolderOpen size={20} />
             <span>快速位置</span>
           </div>
-          <div className="quick-list">
-            {quickRoots.map((root) => (
-              <button key={root} onClick={() => browse(root)} title={root} type="button">
-                <Folder size={15} />
-                <span>{root}</span>
-              </button>
-            ))}
+          <div className="quick-sections">
+            {recentWorkspaces.length > 0 ? (
+              <section className="quick-section">
+                <strong>最近工程</strong>
+                <div className="quick-list">
+                  {recentWorkspaces.map((root) => (
+                    <button key={root} onClick={() => openWorkspace(root)} title={root} type="button">
+                      <FolderOpen size={15} />
+                      <span>{root}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            <section className="quick-section">
+              <strong>快速位置</strong>
+              <div className="quick-list">
+                {quickRoots.map((root) => (
+                  <button key={root} onClick={() => browse(root)} title={root} type="button">
+                    <Folder size={15} />
+                    <span>{root}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
           </div>
         </aside>
 
@@ -128,4 +153,25 @@ export function WorkspaceStartScreen({ onLoaded }: WorkspaceStartScreenProps) {
       </section>
     </main>
   );
+}
+
+function loadRecentWorkspaces() {
+  const raw = localStorage.getItem(recentWorkspaceStorageKey);
+
+  if (!raw) {
+    return [];
+  }
+
+  const parsed = JSON.parse(raw) as unknown;
+  return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+}
+
+function saveRecentWorkspace(
+  workspaceRoot: string,
+  current: string[],
+  setRecentWorkspaces: (workspaces: string[]) => void
+) {
+  const next = [workspaceRoot, ...current.filter((item) => item !== workspaceRoot)].slice(0, maxRecentWorkspaces);
+  localStorage.setItem(recentWorkspaceStorageKey, JSON.stringify(next));
+  setRecentWorkspaces(next);
 }

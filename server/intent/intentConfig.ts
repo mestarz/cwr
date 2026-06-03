@@ -26,7 +26,6 @@ export type IntentTaskConfig = {
   description: string;
   keywords: string[];
   modelProfile: string;
-  confidence: number;
   flags: IntentTaskFlags;
 };
 

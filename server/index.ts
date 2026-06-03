@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { PiAgentBridgeRuntime } from "./piAgentBridge.js";
 import { listWorkspaceDirectories, loadWorkspaceFiles } from "./workspaceFiles.js";
-import type { AgentBridgeInput } from "./types.js";
+import type { AgentBridgeInput, AgentEditorResult, AgentStatusUpdate } from "./types.js";
 
 const host = "127.0.0.1";
 const port = 4174;
@@ -16,7 +16,7 @@ createServer(async (request, response) => {
         name: "Emma Pi Agent Bridge",
         status: "ok",
         frontend: "http://127.0.0.1:5173",
-        api: ["/api/files?root=<path>", "/api/directories?root=<path>", "/api/chat"]
+        api: ["/api/files?root=<path>", "/api/directories?root=<path>", "/api/chat", "/api/chat/stream"]
       });
       return;
     }
@@ -50,6 +50,11 @@ createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/chat/stream") {
+      await handleChatStream(request, response);
+      return;
+    }
+
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
@@ -64,6 +69,45 @@ function sendJson(response: ServerResponse, status: number, body: unknown) {
   });
   response.end(JSON.stringify(body));
 }
+
+async function handleChatStream(request: IncomingMessage, response: ServerResponse) {
+  response.writeHead(200, {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "X-Accel-Buffering": "no"
+  });
+
+  const sendEvent = (event: AgentStreamServerEvent) => {
+    response.write(`${JSON.stringify(event)}\n`);
+  };
+
+  try {
+    const input = (await readJson(request)) as AgentBridgeInput;
+    const result = await bridge.run(input, (status) => {
+      sendEvent({ type: "status", status });
+    });
+    sendEvent({ type: "result", result });
+  } catch (error) {
+    sendEvent({ type: "error", error: error instanceof Error ? error.message : String(error) });
+  } finally {
+    response.end();
+  }
+}
+
+type AgentStreamServerEvent =
+  | {
+      type: "status";
+      status: AgentStatusUpdate;
+    }
+  | {
+      type: "result";
+      result: AgentEditorResult;
+    }
+  | {
+      type: "error";
+      error: string;
+    };
 
 async function readJson(request: IncomingMessage) {
   const chunks: Buffer[] = [];

@@ -1,10 +1,13 @@
+import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, extname, relative, resolve } from "node:path";
+import { promisify } from "node:util";
 import type { WorkspaceDirectoryListing, WorkspaceFile } from "./types.js";
 
 const ignoredDirs = new Set([".git", ".pi", ".codex", ".agents", "node_modules", "dist", "dist-server", "build", "coverage"]);
 const maxFiles = 200;
 const maxBytes = 160_000;
+const execFileAsync = promisify(execFile);
 
 const languageByExt: Record<string, string> = {
   ".css": "css",
@@ -29,15 +32,27 @@ export async function loadWorkspaceFiles(workspaceRoot: string): Promise<Workspa
     throw new Error(`工程目录不存在或不是目录：${root}`);
   }
 
-  const paths = await collectFiles(root, root);
+  const paths = await collectWorkspaceFilePaths(root);
+  const files: WorkspaceFile[] = [];
 
-  return Promise.all(
-    paths.slice(0, maxFiles).map(async (path) => ({
-      path: relative(root, path),
+  for (const path of paths) {
+    if (files.length >= maxFiles || !isReadableSourceFile(path)) {
+      continue;
+    }
+
+    const fileStat = await stat(path);
+    if (fileStat.size > maxBytes) {
+      continue;
+    }
+
+    files.push({
+      path: toWorkspacePath(relative(root, path)),
       language: getLanguage(path),
       content: await readFile(path, "utf8")
-    }))
-  );
+    });
+  }
+
+  return files;
 }
 
 export async function listWorkspaceDirectories(workspaceRoot: string): Promise<WorkspaceDirectoryListing> {
@@ -49,19 +64,59 @@ export async function listWorkspaceDirectories(workspaceRoot: string): Promise<W
   }
 
   const entries = await readdir(root, { withFileTypes: true });
-  const directories = entries
-    .filter((entry) => entry.isDirectory() && !ignoredDirs.has(entry.name))
-    .map((entry) => ({
-      path: resolve(root, entry.name),
+  const isGitWorkspace = await isInsideGitWorkTree(root);
+  const directories: WorkspaceDirectoryListing["directories"] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || ignoredDirs.has(entry.name)) {
+      continue;
+    }
+
+    const fullPath = resolve(root, entry.name);
+    if (isGitWorkspace && (await isIgnoredByGit(root, fullPath, true))) {
+      continue;
+    }
+
+    directories.push({
+      path: fullPath,
       name: entry.name
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+    });
+  }
+
+  directories.sort((left, right) => left.name.localeCompare(right.name));
 
   return {
     root,
     parent: dirname(root) === root ? undefined : dirname(root),
     directories
   };
+}
+
+async function collectWorkspaceFilePaths(root: string): Promise<string[]> {
+  const gitPaths = await listGitVisibleFiles(root);
+
+  if (gitPaths) {
+    return gitPaths;
+  }
+
+  return collectFiles(root, root);
+}
+
+async function listGitVisibleFiles(root: string): Promise<string[] | undefined> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", root, "ls-files", "-co", "--exclude-standard", "-z"], {
+      encoding: "buffer",
+      maxBuffer: 20 * 1024 * 1024
+    });
+
+    return stdout
+      .toString("utf8")
+      .split("\0")
+      .filter(Boolean)
+      .map((path) => resolve(root, path));
+  } catch {
+    return undefined;
+  }
 }
 
 async function collectFiles(root: string, dir: string): Promise<string[]> {
@@ -95,4 +150,32 @@ function isReadableSourceFile(path: string) {
 
 function getLanguage(path: string) {
   return languageByExt[extname(path)] ?? basename(path);
+}
+
+async function isInsideGitWorkTree(root: string) {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
+      encoding: "utf8"
+    });
+
+    return stdout.trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+async function isIgnoredByGit(root: string, path: string, isDirectory: boolean) {
+  const relativePath = toWorkspacePath(relative(root, path));
+  const gitPath = isDirectory ? `${relativePath}/` : relativePath;
+
+  try {
+    await execFileAsync("git", ["-C", root, "check-ignore", "-q", "--", gitPath]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function toWorkspacePath(path: string) {
+  return path.replaceAll("\\", "/");
 }

@@ -7,8 +7,10 @@ export type ShowRelatedFilesInput = {
 export const showRelatedFilesSkill = {
   name: "show_related_files",
   description:
-    "当用户询问某个功能、模块、流程或问题涉及哪些文件、在哪些文件实现、相关文件清单、调用链文件时必须调用。每个文件必须带上它在该功能中的职责、使用范围或关键关系说明；不要把相关文件清单写到普通解释或 Markdown 图中。",
+    "当用户询问某个功能、模块、流程或问题涉及哪些文件、在哪些文件实现、相关文件清单、调用链文件时必须调用。每个文件必须带上它在该功能中的职责、使用范围或关键关系说明；只返回已经通过 read/grep/find/ls 确认存在且确实相关的文件；不要把相关文件清单写到普通解释或 Markdown 图中。",
   call(input: ShowRelatedFilesInput) {
-    return input.files;
+    return input.files.filter(
+      (file) => file.path.trim().length > 0 && file.reason.trim().length > 0 && Number.isFinite(file.relevance) && file.relevance > 0
+    );
   }
 };

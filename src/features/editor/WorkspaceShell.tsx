@@ -1,4 +1,4 @@
-import { FileCode2, PanelLeft, Send } from "lucide-react";
+import { FileCode2, LoaderCircle, PanelLeft, Send } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { AgentFloatingStack } from "./components/AgentFloatingStack";
@@ -13,9 +13,14 @@ export function WorkspaceShell({ workspace: loadedWorkspace }: WorkspaceShellPro
   const workspace = useEditorWorkspace(loadedWorkspace.root, loadedWorkspace.files);
   const [message, setMessage] = useState("");
   const relatedFiles = useMemo(() => {
+    const availablePaths = new Set(workspace.files.map((file) => file.path));
     const relatedByPath = new Map<string, (typeof workspace.agentResult.relatedFiles)[number]>();
 
     for (const file of workspace.agentResult.relatedFiles) {
+      if (!availablePaths.has(file.path)) {
+        continue;
+      }
+
       const current = relatedByPath.get(file.path);
 
       if (!current || file.relevance > current.relevance) {
@@ -24,7 +29,7 @@ export function WorkspaceShell({ workspace: loadedWorkspace }: WorkspaceShellPro
     }
 
     return [...relatedByPath.values()].sort((left, right) => right.relevance - left.relevance);
-  }, [workspace.agentResult.relatedFiles]);
+  }, [workspace.agentResult.relatedFiles, workspace.files]);
   const hasRelatedFiles = relatedFiles.length > 0;
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -55,12 +60,11 @@ export function WorkspaceShell({ workspace: loadedWorkspace }: WorkspaceShellPro
           {workspace.files.length === 0 ? <div className="empty-file-list">当前工程目录没有可展示文件</div> : null}
           {hasRelatedFiles
             ? relatedFiles.map((related) => {
-                const file = workspace.files.find((item) => item.path === related.path);
+                const file = workspace.files.find((item) => item.path === related.path)!;
                 const className = [
                   "file-row",
                   "related",
-                  related.path === workspace.activePath ? "active" : "",
-                  file ? "" : "missing"
+                  related.path === workspace.activePath ? "active" : ""
                 ]
                   .filter(Boolean)
                   .join(" ");
@@ -68,9 +72,8 @@ export function WorkspaceShell({ workspace: loadedWorkspace }: WorkspaceShellPro
                 return (
                   <button
                     className={className}
-                    disabled={!file}
                     key={related.path}
-                    onClick={() => file && workspace.setActivePath(file.path)}
+                    onClick={() => workspace.setActivePath(file.path)}
                     title={`${workspace.workspaceRoot}/${related.path}`}
                     type="button"
                   >
@@ -95,13 +98,19 @@ export function WorkspaceShell({ workspace: loadedWorkspace }: WorkspaceShellPro
         </div>
       </aside>
 
-      <section className="code-stage">
+      <section className={workspace.agentStatus ? "code-stage has-agent-status" : "code-stage"}>
         <header className="code-toolbar">
           <div>
             <strong>{workspace.activeFile?.path ?? "未加载文件"}</strong>
             <span>{workspace.activeFile?.language ?? "empty"}</span>
           </div>
         </header>
+        {workspace.agentStatus ? (
+          <div className="agent-status-bar" role="status">
+            <LoaderCircle size={14} />
+            <span>{workspace.agentStatus}</span>
+          </div>
+        ) : null}
         <div className="editor-frame">
           {workspace.activeFile ? (
             <Editor
