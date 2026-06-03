@@ -19,7 +19,7 @@ export async function sendAgentMessage(request: AgentChatRequest): Promise<Agent
   const body = (await response.json()) as AgentEditorResult | AgentErrorResponse;
 
   if ("error" in body) {
-    throw new Error("error" in body ? body.error : "Agent request failed");
+    throw new Error("error" in body ? body.error : "Agent 请求失败");
   }
 
   return body;
@@ -52,11 +52,11 @@ export async function sendAgentMessageStream(
   });
 
   if (!response.ok) {
-    throw new Error(`Agent stream request failed: HTTP ${response.status}`);
+    throw new Error(`Agent 流式请求失败：HTTP ${response.status}`);
   }
 
   if (!response.body) {
-    throw new Error("Agent stream response has no body");
+    throw new Error("Agent 流式响应没有响应体");
   }
 
   const reader = response.body.getReader();
@@ -98,14 +98,14 @@ export async function sendAgentMessageStream(
     }
   }
 
-  throw new Error("Agent stream ended without a result");
+  throw new Error("Agent 流式响应结束但没有返回结果");
 }
 
 function parseStreamEvent(line: string): AgentStreamClientEvent {
   const parsed = JSON.parse(line) as AgentStreamClientEvent;
 
   if (parsed.type !== "status" && parsed.type !== "result" && parsed.type !== "error") {
-    throw new Error(`Unknown Agent stream event: ${line}`);
+    throw new Error(`未知 Agent 流式事件：${line}`);
   }
 
   return parsed;
@@ -118,7 +118,7 @@ export async function loadWorkspaceFiles(workspaceRoot: string): Promise<Workspa
   const body = (await response.json()) as WorkspaceFile[] | AgentErrorResponse;
 
   if ("error" in body) {
-    throw new Error("error" in body ? body.error : "Workspace files request failed");
+    throw new Error("error" in body ? body.error : "工作区文件请求失败");
   }
 
   return body;

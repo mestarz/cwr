@@ -3,8 +3,8 @@
 | 字段 | 内容 |
 | --- | --- |
 | 编号 | 003 |
-| 类型 | refactor |
-| 状态 | done |
+| 类型 | 重构 |
+| 状态 | 已完成 |
 | 时间 | 2026-06-03 |
 
 ## 背景
@@ -13,17 +13,17 @@
 
 ## 目标
 
-- 删除前端 sample 工作区数据。
+- 删除前端示例工作区数据。
 - 删除后端模拟 Agent Bridge。
 - 使用 `@earendil-works/pi-coding-agent` 的 SDK 运行真实 Coding Agent，不在 Emma 后端单独解析模型。
-- 将展示 skill 注册成 Pi Agent 工具。
+- 将展示能力注册成 Pi Agent 工具。
 
 ## 实现内容
 
-- `PiAgentBridgeRuntime` 通过 `createAgentSession()` 创建真实 Pi Coding Agent session。
-- Emma 后端不传 provider、不传 model，默认模型和 A 键认证由 Pi 自己的设置、AuthStorage、ModelRegistry 处理。
-- `show_explanation`、`show_markdown_diagram`、`show_related_files` 均以 Pi custom tool 注册。
-- 前端不再加载 sample 文件，文件列表来自 `/api/files`。
+- `PiAgentBridgeRuntime` 通过 `createAgentSession()` 创建真实 Pi Coding Agent 会话。
+- Emma 后端不传服务提供方、不传模型，默认模型和 A 键认证由 Pi 自己的设置、AuthStorage、ModelRegistry 处理。
+- `show_explanation`、`show_markdown_diagram`、`show_related_files` 均以 Pi 自定义工具注册。
+- 前端不再加载示例文件，文件列表来自 `/api/files`。
 - API 错误会返回给前端并显示请求失败浮层。
 
 ## 修改文件清单
@@ -46,4 +46,4 @@
 - `npm run server:build` 通过
 - 真实 Pi Agent Bridge 后端启动通过
 - `/api/files` 验证通过
-- Emma 后端已移除 provider/model 选择逻辑，`/api/chat` 由 Pi Coding Agent 自己的默认模型和 A 键配置处理
+- Emma 后端已移除服务提供方和模型选择逻辑，`/api/chat` 由 Pi Coding Agent 自己的默认模型和 A 键配置处理

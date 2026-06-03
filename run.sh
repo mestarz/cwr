@@ -16,10 +16,10 @@ FRONTEND_PID_FILE="$RUNTIME_DIR/emma-frontend.pid"
 FRONTEND_LOG_FILE="$RUNTIME_DIR/emma-frontend.log"
 
 usage() {
-  printf 'Usage: %s [-R|-S]\n' "$0"
-  printf '  no args  Start app\n'
-  printf '  -R       Restart app\n'
-  printf '  -S       Stop app\n'
+  printf '用法：%s [-R|-S]\n' "$0"
+  printf '  无参数   启动应用\n'
+  printf '  -R       重启应用\n'
+  printf '  -S       停止应用\n'
 }
 
 is_running() {
@@ -44,7 +44,7 @@ wait_for_exit() {
     sleep 0.2
   done
 
-  printf 'Process %s did not exit after stop signal.\n' "$pid" >&2
+  printf '进程 %s 收到停止信号后仍未退出。\n' "$pid" >&2
 }
 
 stop_pid_file() {
@@ -56,9 +56,9 @@ stop_pid_file() {
   if [[ -n "$pid" ]] && is_running "$pid"; then
     kill "$pid"
     wait_for_exit "$pid"
-    printf '%s stopped.\n' "$label"
+    printf '%s 已停止。\n' "$label"
   else
-    printf '%s is not running.\n' "$label"
+    printf '%s 未运行。\n' "$label"
   fi
 
   rm -f "$pid_file"
@@ -95,7 +95,7 @@ wait_for_port() {
     sleep 0.2
   done
 
-  printf '%s failed to become ready. Log:\n' "$label" >&2
+  printf '%s 启动后未就绪。日志：\n' "$label" >&2
   cat "$log_file" >&2
   exit 1
 }
@@ -104,7 +104,7 @@ start_backend() {
   local pid
   pid="$(read_pid "$BACKEND_PID_FILE" || true)"
   if [[ -n "$pid" ]] && is_running "$pid"; then
-    printf 'Emma backend is already running: http://%s:%s (pid %s)\n' "$BACKEND_HOST" "$BACKEND_PORT" "$pid"
+    printf 'Emma 后端已在运行：http://%s:%s（进程 %s）\n' "$BACKEND_HOST" "$BACKEND_PORT" "$pid"
     return
   fi
 
@@ -121,15 +121,15 @@ start_backend() {
   pid="$!"
   printf '%s\n' "$pid" > "$BACKEND_PID_FILE"
 
-  wait_for_port "$BACKEND_HOST" "$BACKEND_PORT" "Emma backend" "$BACKEND_LOG_FILE"
-  printf 'Emma backend started: http://%s:%s (pid %s)\n' "$BACKEND_HOST" "$BACKEND_PORT" "$pid"
+  wait_for_port "$BACKEND_HOST" "$BACKEND_PORT" "Emma 后端" "$BACKEND_LOG_FILE"
+  printf 'Emma 后端已启动：http://%s:%s（进程 %s）\n' "$BACKEND_HOST" "$BACKEND_PORT" "$pid"
 }
 
 start_frontend() {
   local pid
   pid="$(read_pid "$FRONTEND_PID_FILE" || true)"
   if [[ -n "$pid" ]] && is_running "$pid"; then
-    printf 'Emma frontend is already running: http://%s:%s (pid %s)\n' "$FRONTEND_PUBLIC_HOST" "$FRONTEND_PORT" "$pid"
+    printf 'Emma 前端已在运行：http://%s:%s（进程 %s）\n' "$FRONTEND_PUBLIC_HOST" "$FRONTEND_PORT" "$pid"
     return
   fi
 
@@ -144,20 +144,20 @@ start_frontend() {
   pid="$!"
   printf '%s\n' "$pid" > "$FRONTEND_PID_FILE"
 
-  wait_for_port "$FRONTEND_PUBLIC_HOST" "$FRONTEND_PORT" "Emma frontend" "$FRONTEND_LOG_FILE"
-  printf 'Emma frontend started: http://%s:%s (pid %s)\n' "$FRONTEND_PUBLIC_HOST" "$FRONTEND_PORT" "$pid"
+  wait_for_port "$FRONTEND_PUBLIC_HOST" "$FRONTEND_PORT" "Emma 前端" "$FRONTEND_LOG_FILE"
+  printf 'Emma 前端已启动：http://%s:%s（进程 %s）\n' "$FRONTEND_PUBLIC_HOST" "$FRONTEND_PORT" "$pid"
 }
 
 start_app() {
   mkdir -p "$RUNTIME_DIR"
   start_backend
   start_frontend
-  printf 'Open Emma Editor: http://%s:%s\n' "$FRONTEND_PUBLIC_HOST" "$FRONTEND_PORT"
+  printf '打开 Emma 编辑器：http://%s:%s\n' "$FRONTEND_PUBLIC_HOST" "$FRONTEND_PORT"
 }
 
 stop_app() {
-  stop_pid_file "Emma frontend" "$FRONTEND_PID_FILE"
-  stop_pid_file "Emma backend" "$BACKEND_PID_FILE"
+  stop_pid_file "Emma 前端" "$FRONTEND_PID_FILE"
+  stop_pid_file "Emma 后端" "$BACKEND_PID_FILE"
   stop_port_processes "$FRONTEND_PORT"
   stop_port_processes "$BACKEND_PORT"
 }

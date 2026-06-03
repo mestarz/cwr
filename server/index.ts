@@ -55,12 +55,12 @@ createServer(async (request, response) => {
       return;
     }
 
-    sendJson(response, 404, { error: "Not found" });
+    sendJson(response, 404, { error: "未找到接口。" });
   } catch (error) {
     sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
   }
 }).listen(port, host, () => {
-  console.log(`Pi Agent Bridge listening on http://${host}:${port}`);
+  console.log(`Pi Agent 桥接服务已监听：http://${host}:${port}`);
 });
 
 function sendJson(response: ServerResponse, status: number, body: unknown) {

@@ -137,7 +137,7 @@ function getModelProfile(id: string, config: IntentConfig): AgentModelProfile {
   const profile = config.modelProfiles[id];
 
   if (!profile) {
-    throw new Error(`意图配置引用了不存在的模型 profile：${id}`);
+    throw new Error(`意图配置引用了不存在的模型配置：${id}`);
   }
 
   return toModelProfile(id, profile);

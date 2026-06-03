@@ -13,7 +13,7 @@ export type PiAgentModelOptions = Pick<
 
 export function resolvePiAgentModel(profile: AgentModelProfile): PiAgentModelOptions {
   if (!profile.provider || !profile.name) {
-    throw new Error(`Pi Agent 模型 profile 缺少 provider 或 name：${profile.id}`);
+    throw new Error(`Pi Agent 模型配置缺少服务提供方或模型名称：${profile.id}`);
   }
 
   const loadError = modelRegistry.getError();
@@ -26,7 +26,7 @@ export function resolvePiAgentModel(profile: AgentModelProfile): PiAgentModelOpt
     throw new Error(
       [
         `Pi Agent 模型配置未找到：${profile.provider}/${profile.name}`,
-        `profile=${profile.id}`,
+        `模型配置=${profile.id}`,
         `已加载模型=${listLoadedModels()}`
       ].join("\n")
     );

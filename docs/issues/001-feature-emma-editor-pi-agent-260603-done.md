@@ -3,8 +3,8 @@
 | 字段 | 内容 |
 | --- | --- |
 | 编号 | 001 |
-| 类型 | feature |
-| 状态 | done |
+| 类型 | 功能 |
+| 状态 | 已完成 |
 | 时间 | 2026-06-03 |
 
 ## 背景
@@ -23,7 +23,7 @@
 - 新增 Vite、TypeScript、React 基础配置。
 - 新增 Emma 编辑器主界面：左侧文件列表、中间代码展示、底部文本输入。
 - 新增 Markdown 预览组件，并支持 Mermaid 图渲染。
-- 新增前端 Agent API client 和共享数据类型。
+- 新增前端 Agent 接口客户端和共享数据类型。
 - 新增后端 `/api/files` 和 `/api/chat` 接口。
 - 新增 `PiAgentBridge` 接口与真实 Pi Agent Bridge 实现。
 
@@ -51,4 +51,4 @@
 - `npm run server:dev` 启动成功
 - 后端 `/api/files` 和 `/api/chat` 验证通过
 - Vite 代理 `/api/files` 验证通过
-- 构建存在 Monaco/Mermaid 引起的大 chunk 警告，MVP 阶段暂不拆包
+- 构建存在 Monaco/Mermaid 引起的大体积产物警告，最小可用阶段暂不拆包
